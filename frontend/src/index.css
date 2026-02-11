@@ -1,0 +1,9 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  margin: 0;
+  background: radial-gradient(circle at left, #6d28d9, #050515);
+  font-family: "Poppins", sans-serif;
+}
