@@ -1,17 +1,13 @@
-# Build React app
-FROM node:18 AS build
+FROM python:3.10
 
 WORKDIR /app
-COPY package*.json ./
-RUN npm install
+
+COPY requirements.txt .
+
+RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
-RUN npm run build
 
-# Serve with nginx
-FROM nginx:alpine
+EXPOSE 8000
 
-COPY --from=build /app/build /usr/share/nginx/html
-
-EXPOSE 80
-CMD ["nginx", "-g", "daemon off;"]
+CMD ["python", "app.py"]

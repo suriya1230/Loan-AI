@@ -1,21 +1,17 @@
 version: "3.9"
 
 services:
-
   backend:
     build:
-      context: ./backend
-    container_name: loanai-backend
+      context: ../backend
     ports:
       - "5000:5000"
+    command: python app.py
     restart: always
 
   frontend:
     build:
-      context: ./frontend
-    container_name: loanai-frontend
+      context: ../frontend
     ports:
       - "3000:80"
-    depends_on:
-      - backend
     restart: always
