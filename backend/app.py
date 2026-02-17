@@ -68,13 +68,21 @@ def predict():
         data = request.json
         df = pd.DataFrame([data])
 
-        # -------------------------
-        # Feature engineering
-        # -------------------------
-        df = engineer_features(df)
+        print("\n===== RAW INPUT FROM FRONTEND =====")
+        print(df.T)
 
-        # DEBUG — compare with Colab
-        print("\n===== MODEL INPUT =====")
+        # -------------------------
+        # Align columns with training pipeline
+        # -------------------------
+        expected_columns = model.feature_names_in_
+
+        for col in expected_columns:
+            if col not in df.columns:
+                df[col] = 0
+
+        df = df[expected_columns]
+
+        print("\n===== FINAL MODEL INPUT =====")
         print(df.T)
 
         # -------------------------
@@ -85,20 +93,20 @@ def predict():
 
         reject_prob = round(prob_map["Rejected"] * 100, 1)
         approve_prob = round(prob_map["Approved"] * 100, 1)
-        print("\nMODEL PROBABILITIES:")
-        print(prob_map)
+
+        print("\nMODEL PROBABILITIES:", prob_map)
 
         # -------------------------
-        # Extract features
+        # Extract features (for logic)
         # -------------------------
-        credit_score = float(df["credit_score"][0])
-        dti = float(df["dti"][0])
-        defaults = str(df["previous_loan_defaults_on_file"][0]).lower()
-        interest = float(df["loan_int_rate"][0])
-        emp_exp = float(df["person_emp_exp"][0])
-        home = df["person_home_ownership"][0]
-        risk = df["credit_risk_category"][0]
-        loan_ratio = float(df["loan_percent_income"][0])
+        credit_score = float(data.get("credit_score", 0))
+        dti = float(data.get("dti", 0))
+        defaults = str(data.get("previous_loan_defaults_on_file", "no")).lower()
+        interest = float(data.get("loan_int_rate", 0))
+        emp_exp = float(data.get("person_emp_exp", 0))
+        home = data.get("person_home_ownership", "")
+        risk = data.get("credit_risk_category", "")
+        loan_ratio = float(data.get("loan_percent_income", 0))
 
         # -------------------------
         # Decision logic
@@ -112,12 +120,13 @@ def predict():
 
         if credit_score < 600 or dti > 0.50 or defaults == "yes":
             decision = "Rejected ❌"
-        override = False
-        if (credit_score >= 720 and dti <= 0.25 and defaults == "no" and loan_ratio <= 0.30 and emp_exp >= 2 and risk.upper() == "LOW"):
+
+        if (credit_score >= 720 and dti <= 0.25 and defaults == "no"
+            and loan_ratio <= 0.30 and emp_exp >= 2 and risk.upper() == "LOW"):
             decision = "Approved ✅"
             approve_prob = 95.0
             reject_prob = 5.0
-            override = True
+
         # -------------------------
         # Explanation logic
         # -------------------------
@@ -156,7 +165,6 @@ def predict():
             reasons.append("Previous loan default history")
             suggestions.append("Maintain clean repayment.")
 
-        # fallback reason
         if decision.startswith("Rejected") and not reasons:
             reasons.append("Model detected financial risk")
             suggestions.append("Review financial profile.")
@@ -184,10 +192,4 @@ def predict():
             "suggestions": [],
             "error": str(e)
         })
-
-
-# ======================================
-# Run Server
-# ======================================
-
 
