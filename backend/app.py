@@ -2,8 +2,8 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 import joblib
 import pandas as pd
-from model_columns import MODEL_COLUMNS
-
+import os
+import sys
 
 # ======================================
 # Flask Setup
@@ -16,16 +16,24 @@ CORS(app)
 # ======================================
 MODEL_PATH = "model/loan_approval_pipeline.pkl"
 
+print("🔄 Loading model from:", MODEL_PATH)
+
+if not os.path.exists(MODEL_PATH):
+    print("❌ MODEL FILE NOT FOUND!")
+    sys.exit(1)
+
 try:
     model = joblib.load(MODEL_PATH)
     class_labels = model.classes_
-    print("✅ Model Loaded:", class_labels)
+    print("✅ Model Loaded Successfully")
+    print("Classes:", class_labels)
 except Exception as e:
-    print("❌ Model load error:", e)
+    print("❌ Model failed to load:", e)
+    sys.exit(1)
 
 
 # ======================================
-# Feature Engineering Function
+# Feature Engineering (MUST MATCH TRAINING)
 # ======================================
 def engineer_features(df):
 
@@ -65,54 +73,18 @@ def predict():
 
     try:
         data = request.json
-
-        # -------------------------
-        # Convert to DataFrame
-        # -------------------------
         df = pd.DataFrame([data])
 
         print("\n===== RAW INPUT =====")
         print(df.T)
 
-        # -------------------------
-        # TYPE FIX (VERY IMPORTANT)
-        # -------------------------
+        # Feature Engineering
+        df = engineer_features(df)
 
-        numeric_cols = [
-            "person_age",
-            "person_income",
-            "person_emp_exp",
-            "loan_amnt",
-            "loan_int_rate",
-            "credit_score",
-            "cb_person_cred_hist_length",
-            "monthly_income",
-            "loan_percent_income",
-            "emi",
-            "dti"
-        ]
+        print("\n===== FEATURES AFTER ENGINEERING =====")
+        print(df.T)
 
-        for col in numeric_cols:
-            if col in df.columns:
-                df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
-
-        # Convert categorical columns STRICTLY to string
-        categorical_cols = [
-            "person_gender",
-            "person_education",
-            "person_home_ownership",
-            "loan_intent",
-            "previous_loan_defaults_on_file",
-            "credit_risk_category"
-        ]
-
-        for col in categorical_cols:
-            if col in df.columns:
-                df[col] = df[col].astype(str)
-
-        # -------------------------
-        # ALIGN WITH TRAINED PIPELINE
-        # -------------------------
+        # Align with training pipeline
         expected_columns = model.feature_names_in_
 
         for col in expected_columns:
@@ -124,28 +96,98 @@ def predict():
         print("\n===== FINAL MODEL INPUT =====")
         print(df.T)
 
-        # -------------------------
         # Prediction
-        # -------------------------
         prob = model.predict_proba(df)[0]
-        prob_map = dict(zip(model.classes_, prob))
+        prob_map = dict(zip(class_labels, prob))
 
         reject_prob = round(prob_map["Rejected"] * 100, 1)
         approve_prob = round(prob_map["Approved"] * 100, 1)
 
-        decision = "Approved ✅" if approve_prob >= reject_prob else "Rejected ❌"
+        print("MODEL OUTPUT:", prob_map)
 
+        # ======================================
+        # Decision Logic
+        # ======================================
+        credit_score = float(data.get("credit_score", 0))
+        dti = float(data.get("dti", 0))
+        defaults = str(data.get("previous_loan_defaults_on_file", "no")).lower()
+        interest = float(data.get("loan_int_rate", 0))
+        emp_exp = float(data.get("person_emp_exp", 0))
+        home = data.get("person_home_ownership", "")
+        risk = data.get("credit_risk_category", "")
+        loan_ratio = float(data.get("loan_percent_income", 0))
+
+        if approve_prob >= 60:
+            decision = "Approved ✅"
+        elif reject_prob >= 60:
+            decision = "Rejected ❌"
+        else:
+            decision = "Borderline ⚠️"
+
+        if credit_score < 600 or dti > 0.50 or defaults == "yes":
+            decision = "Rejected ❌"
+
+        if (credit_score >= 720 and dti <= 0.25 and defaults == "no"
+            and loan_ratio <= 0.30 and emp_exp >= 2 and risk.upper() == "LOW"):
+            decision = "Approved ✅"
+            approve_prob = 95.0
+            reject_prob = 5.0
+
+        # ======================================
+        # Explanation + Recommendations
+        # ======================================
+        reasons = []
+        suggestions = []
+
+        if credit_score < 650:
+            reasons.append("Low credit score")
+            suggestions.append("Improve credit score above 650.")
+
+        if dti > 0.35:
+            reasons.append("High debt-to-income ratio")
+            suggestions.append("Reduce existing debts.")
+
+        if loan_ratio > 0.30:
+            reasons.append("Loan amount too high compared to income")
+            suggestions.append("Reduce loan amount.")
+
+        if emp_exp < 2:
+            reasons.append("Not enough employment experience")
+            suggestions.append("Gain stable job experience.")
+
+        if interest > 15:
+            reasons.append("Interest rate too high")
+            suggestions.append("Apply for lower interest loan.")
+
+        if risk.upper() == "HIGH":
+            reasons.append("High credit risk category")
+            suggestions.append("Improve financial profile.")
+
+        if home == "RENT":
+            reasons.append("Rental housing increases repayment risk")
+            suggestions.append("Provide co-applicant or collateral.")
+
+        if defaults == "yes":
+            reasons.append("Previous loan default history")
+            suggestions.append("Maintain clean repayment record.")
+
+        if decision.startswith("Rejected") and not reasons:
+            reasons.append("Model detected financial risk")
+            suggestions.append("Review financial profile.")
+
+        # ======================================
+        # Response
+        # ======================================
         return jsonify({
             "decision": decision,
             "approve_probability": approve_prob,
             "reject_probability": reject_prob,
-            "reasons": [],
-            "suggestions": []
+            "reasons": reasons,
+            "suggestions": suggestions
         })
 
     except Exception as e:
-
-        print("❌ FULL ERROR:", str(e))
+        print("❌ PREDICTION ERROR:", e)
 
         return jsonify({
             "decision": "Error ❌",
@@ -155,3 +197,10 @@ def predict():
             "suggestions": [],
             "error": str(e)
         })
+
+
+# ======================================
+# Run Server (Render uses Gunicorn)
+# ======================================
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000)
