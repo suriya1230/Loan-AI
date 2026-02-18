@@ -1,0 +1,20 @@
+MODEL_COLUMNS = [
+'person_age',
+'person_gender',
+'person_education',
+'person_income',
+'person_emp_exp',
+'person_home_ownership',
+'loan_amnt',
+'loan_intent',
+'loan_int_rate',
+'cb_person_cred_hist_length',
+'credit_score',
+'previous_loan_defaults_on_file',
+'credit_risk_category',
+'monthly_income',
+'monthly_interest_rate',
+'emi',
+'dti',
+'loan_percent_income'
+]
